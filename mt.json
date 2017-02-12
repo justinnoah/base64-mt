@@ -1,0 +1,8 @@
+{
+  "authors": ["Justin Noah <justinnoah@gmail.com>"],
+  "name": "base64",
+  "version": "0.1",
+  "paths": [".", "./src"],
+  "entrypoint": "./src/base64",
+  "dependencies": {}
+}
