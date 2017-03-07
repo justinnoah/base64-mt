@@ -4,8 +4,8 @@ exports (main, Base64)
 
 
 def BASE64_PAD :Int := '='.asInteger()
-def b64Alphabet :DeepFrozen := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
-def table_b2a_base64 :DeepFrozen := [
+def table_b2a_base64 :DeepFrozen := "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+def table_a2b_base64 :DeepFrozen := [
     -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
     -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
     -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,62, -1,-1,-1,63,
@@ -16,130 +16,86 @@ def table_b2a_base64 :DeepFrozen := [
     41,42,43,44, 45,46,47,48, 49,50,51,-1, -1,-1,-1,-1
 ]
 
-def find_valid(_msg, _len, _num) as DeepFrozen:
-    traceln(`Find Valid, msg size: ``$_msg.size()```)
-    var msg := _msg
-    var len := _len
-    var num := _num
-    var ret :Int := -1
-    var c :Int := -1
-    var b64val :Int := 0
-    def sf := 0x7f
+def find_valid(msg :Bytes, num :Int) as DeepFrozen:
+    var ret := -1
+    var b64val := 0
 
-    while ((len > 0) && (ret == -1)):
-        c := msg[0]
-        def _c_and_sf :Char := '\x00' + (c & sf)
-        b64val := b64Alphabet.indexOf(`$_c_and_sf`)
-        if ( ((c <= sf) && (b64val != -1))):
+    for c in (msg):
+        b64val := table_a2b_base64[(c & 0x7f)]
+        if ((c != -1) && (b64val != -1)):
             if (num == 0):
                 ret := c
-            num -= 1
-        len -= 1
-        if (len > 0):
-            msg := msg.slice(1)
 
-    traceln(`Find Valid, msg size: $msg.size()`)
     return ret
 
 
 object Base64 as DeepFrozen:
     "Base64 codec as per RFC 4648"
 
-    to encode(_msg :Bytes):
-        var msg := _msg
-        var leftbits := 0
+    to encode(msg :Bytes):
+        var encoded_msg := b``
         var leftchar := 0
-        var encoded_msg := [].diverge()
+        var leftbits := 0
         var this_char := 0
 
-        while (msg.size() > 0):
-            leftchar := leftchar << 8
-            if (leftchar == 0):
-                leftchar := msg[0]
-            msg := msg.slice(1)
+        for c in (msg):
+            leftchar := (leftchar << 8) | c
             leftbits += 8
 
             while (leftbits >= 6):
-                def this_char := (leftchar >> (leftbits - 6)) & 0x3f
+                this_char := (leftchar >> (leftbits - 6)) & 0x3f
                 leftbits -= 6
-                def chr :Int := (b64Alphabet[this_char]).asInteger()
-                encoded_msg.push(chr)
+                encoded_msg += table_b2a_base64.get(this_char).asInteger()
 
         if (leftbits == 2):
-            def chr_idx := (leftchar & 0x03) << 4
-            def chr :Int := (b64Alphabet[chr_idx]).asInteger()
-            encoded_msg.push(chr)
-            encoded_msg.push(BASE64_PAD)
-            encoded_msg.push(BASE64_PAD)
+            def tbl_pos := (leftchar & 0x3) << 4
+            encoded_msg += table_b2a_base64[tbl_pos].asInteger()
+            encoded_msg += BASE64_PAD
+            encoded_msg += BASE64_PAD
         else if (leftbits == 4):
-            def chr_idx := (leftchar & 0x0f) << 2
-            def chr :Int := (b64Alphabet[chr_idx]).asInteger()
-            encoded_msg.push(chr)
-            encoded_msg.push(BASE64_PAD)
+            def tbl_pos := (leftchar & 0xf) << 2
+            encoded_msg += table_b2a_base64[tbl_pos].asInteger()
+            encoded_msg += BASE64_PAD
 
-        return encoded_msg.snapshot()
+        return encoded_msg.asList().snapshot()
 
-    to decode(_msg :Bytes):
-        var msg := _msg
-        var decoded := [].diverge()
+    to decode(msg :Bytes):
+        var decoded_msg := b``
         var leftbits := 0
-        var this_char := 0
         var leftchar := 0
-        var quad_pos :Int := 0
-        def skip_chars := [
-            0x7f, '\n'.asInteger(), '\r'.asInteger(), ' '.asInteger()]
+        var quad_pos := 0
+        var this_char := 0
 
-        while (msg.size() > 0):
-            this_char := msg[0]
-            traceln(`START LOOP: $this_char`)
-
-            # Skip Newlines, spaces, and 0x7f
-            if (skip_chars.contains(this_char)):
-                msg := msg.slice(1)
+        for ascii_byte in (msg):
+            if (ascii_byte > 0x7f):
                 continue
 
-            # Handle padding (= characters)
-            if (this_char == BASE64_PAD):
-                if ((quad_pos < 2) || ((quad_pos == 2) && (find_valid(msg, msg.size(), 1) != BASE64_PAD))):
-                    # Skip over '='
-                    msg := msg.slice(1)
+            if (ascii_byte == BASE64_PAD):
+                if ((quad_pos < 2) ||
+                    ((quad_pos == 2) &&
+                    (find_valid(msg, 1) != BASE64_PAD))):
                     continue
                 else:
                     leftbits := 0
                     break
 
-            this_char := table_b2a_base64[this_char]
-            def x := '\x00' + this_char
-            traceln(`This char: $this_char == $x`)
+            this_char := table_a2b_base64[ascii_byte]
             if (this_char == -1):
-                msg := msg.slice(1)
                 continue
 
-            quad_pos := ((quad_pos + 1) & 0x03)
-            def t := leftchar << 6
-
-            if (t == 0):
-                leftchar := this_char
-            else:
-                leftchar := t
+            quad_pos := (quad_pos + 1) & 0x03
+            leftchar := (leftchar << 6) | this_char
             leftbits += 6
-            traceln(`Leftbits: $leftbits`)
 
             if (leftbits >= 8):
                 leftbits -= 8
-                decoded.push(
-                    ((leftchar >> leftbits) & 0xff)
-                )
-                def one_and_one := ((1 << leftbits) - 1)
-                leftchar &= one_and_one
-
-            # Move forward in the data
-            msg := msg.slice(1)
+                decoded_msg += (leftchar >> leftbits) & 0xff
+                leftchar &= (1 << leftbits) - 1
 
         if (leftbits != 0):
-            throw(`Invalid Padding: $leftbits`)
+            throw(b`Incorrect padding.`)
 
-        return decoded.snapshot()
+        return decoded_msg.asList().snapshot()
 
 
 def test_b64_encode(assert):
